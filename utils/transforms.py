@@ -2,13 +2,37 @@
 import oneflow as flow
 import cv2
 
+from PIL import Image
+import numpy as np
+import oneflow.typing as tp
+from typing import Tuple
+
+from PIL import Image
+
+
 def read_image(image_dir, cfg):
-    # image_content = tf.io.read_file(filename=image_dir)
-    image_content = cv2.imread(image_dir, cv2.IMREAD_COLOR)
+
+    image= Image.open(image_dir)
+    # image_files = [open(im, "rb") for im in images]image.shape
+    # image = image.read()#[imf.read() for imf in image_files]\
+    # image=np.array(image).astype(np.float32)
+    # print(image.shape)
+    
+    return image
+
+    # # image_content = tf.io.read_file(filename=image_dir)
+    # img=Image.open(image_dir)
+    # #转换成np.ndarray格式
+    # image=np.array(img)
+    # print("img2:",image.shape)
+    # print("img2:",type(image))
+    # print("-"*10)
+
+    # image_content = _of_image_decode(image_dir)
     # The 'image' has been normalized.  这个到底是什么,感觉会有问题  要解码为tnsor吗
     # image = tf.io.decode_image(contents=image_content, channels=cfg.CHANNELS, dtype=tf.dtypes.float32)
-    image = flow.image.decode(images_bytes_buffer=image_content, dtype=flow.float32)#color_space
-    return image
+    # image = flow.image.decode(images_bytes_buffer=image_content, dtype=flow.float32)#color_space
+    # return image
 
 
 # Determine whether a point is within a rectangular border.
@@ -34,28 +58,32 @@ class RandomCropTransform(object):
         self.resize_w = resize_w
         self.num_of_joints = num_of_joints
 
+    @flow.global_function()
     def image_transform(self):
         if self.resize_h != self.resize_w:
             raise ValueError("The values of resize_h and resize_w should be equal.")
         # human_instance = tf.image.crop_to_bounding_box(image=self.image,
-        #                                                offset_height=self.bbox[1],
-        #                                                offset_width=self.bbox[0],
-        #                                                target_height=self.bbox[3],
-        #                                                target_width=self.bbox[2])
-        human_instance = flow.image.crop_mirror_normalize(input_blob=self.image,
-                                                          crop_h=self.bbox[3],
-                                                          crop_w=self.bbox[2],
-                                                          crop_pos_y=self.bbox[1],
-                                                          crop_pos_x=self.bbox[0])
-
+                    # offset_height=self.bbox[1],
+                    # offset_width=self.bbox[0],
+                    # target_height=self.bbox[3],
+                    # target_width=self.bbox[2])
+        # human_instance = flow.image.crop_mirror_normalize(input_blob=self.image,
+        #                           crop_h=self.bbox[3],
+        #                           crop_w=self.bbox[2],
+        #                           crop_pos_y=self.bbox[1],
+        #                           crop_pos_x=self.bbox[0])
+        human_instance = self.image.crop((self.bbox[0],self.bbox[1],self.bbox[0]+self.bbox[2],self.bbox[1]+self.bbox[3]))
+        human_instance_size = np.array(human_instance).astype(np.float32)
         left_top_of_human_instance = self.bbox[0:2]
-        crop_rect, cropped_image = self.__random_crop_in_roi(image=self.image, roi=human_instance,
+        crop_rect, cropped_image = self.__random_crop_in_roi(image=self.image, roi=human_instance_size,
                                                              left_top_of_roi=left_top_of_human_instance)
         resize_ratio = self.resize_h / crop_rect.shape[-1]
         # resized_image = tf.image.resize(images=cropped_image, size=[self.resize_h, self.resize_w])
-        resized_image = flow.image.Resize(images=cropped_image, target_size=[self.resize_h, self.resize_w])
+        resized_image = cropped_image.resize([self.resize_h, self.resize_w])#flow.image.Resize(images=cropped_image, target_size=[self.resize_h, self.resize_w])
+        resized_image = np.array(resized_image).astype(np.float32)
         return resized_image, resize_ratio, crop_rect
 
+    # @flow.global_function()
     def keypoints_transform(self, resize_ratio, crop_rect):
         crop_rect = crop_rect.numpy()
         transformed_keypoints = self.keypoints.numpy()
@@ -92,18 +120,19 @@ class RandomCropTransform(object):
             y_random_crop = left_top_of_roi[1]
         # crop_rect = tf.convert_to_tensor(value=[x_random_crop, y_random_crop, shorter_border, shorter_border],
         #                                  dtype=tf.dtypes.int32)
-        crop_rect = flow.tensor_buffer_to_tensor([x_random_crop, y_random_crop, shorter_border, shorter_border],
-                                                 flow.int32)
+        crop_rect = np.array(x_random_crop, y_random_crop, shorter_border, shorter_border).astype(np.int32)
         # cropped_image = tf.image.crop_to_bounding_box(image=image,
-        #                                               offset_height=y_random_crop,
-        #                                               offset_width=x_random_crop,
-        #                                               target_height=shorter_border,
-        #                                               target_width=shorter_border)
-        cropped_image = flow.image.crop_mirror_normalize(input_blob=image,
-                                                         crop_h=shorter_border,
-                                                         crop_w=shorter_border,
-                                                         crop_pos_y=y_random_crop,
-                                                         crop_pos_x=x_random_crop)
+#                                               offset_height=y_random_crop,
+#                                               offset_width=x_random_crop,
+#                                               target_height=shorter_border,
+#                                               target_width=shorter_border)
+        
+        cropped_image = image.crop((shorter_border,shorter_border,shorter_border+x_random_crop,shorter_border+y_random_crop))
+        # cropped_image = flow.image.crop_mirror_normalize(input_blob=image,
+        #                         crop_h=shorter_border,
+        #                         crop_w=shorter_border,
+        #                         crop_pos_y=y_random_crop,
+        #                         crop_pos_x=x_random_crop)
         return crop_rect, cropped_image
 
 
@@ -118,23 +147,29 @@ class ResizeTransform(object):
 
     def image_transform(self):
         # human_instance = tf.image.crop_to_bounding_box(image=self.image,
-        #                                                offset_height=self.bbox[1],
-        #                                                offset_width=self.bbox[0],
-        #                                                target_height=self.bbox[3],
-        #                                                target_width=self.bbox[2])
-        human_instance = flow.image.crop_mirror_normalize(input_blob=self.image,
-                                                          crop_h=self.bbox[3],
-                                                          crop_w=self.bbox[2],
-                                                          crop_pos_y=self.bbox[1],
-                                                          crop_pos_x=self.bbox[0])
+                              # offset_height=self.bbox[1],
+                              # offset_width=self.bbox[0],
+                              # target_height=self.bbox[3],
+        # print(self.bbox)          #                                    target_width=self.bbox[2])
+        # human_instance = flow.image.crop_mirror_normalize(input_blob=self.image,
+        #                           crop_h=self.bbox[3],
+        #                           crop_w=self.bbox[2],
+        #                           crop_pos_y=self.bbox[1],
+        #                           crop_pos_x=self.bbox[0])
+        human_instance = self.image.crop((self.bbox[0],self.bbox[1],self.bbox[0]+self.bbox[2],self.bbox[1]+self.bbox[3]))
+        human_instance_size = np.array(human_instance).astype(np.float32)
+        # print(" simage:",human_instance.shape)
         left_top_of_human_instance = self.bbox[0:2]
-        resize_ratio = [self.resize_h / human_instance.shape[0], self.resize_w / human_instance.shape[1]]
+        resize_ratio = [self.resize_h / human_instance_size.shape[0], self.resize_w / human_instance_size.shape[1]]
         # resized_image = tf.image.resize(images=human_instance, size=[self.resize_h, self.resize_w])
-        resized_image = flow.image.Resize(image=human_instance, target_size=[self.resize_h, self.resize_w])
+        resized_image = human_instance.resize([self.resize_h, self.resize_w])#flow.image.Resize(image=human_instance, target_size=[self.resize_h, self.resize_w])
+        resized_image = np.array(resized_image).astype(np.float32)
+        # print("image:",resized_image.shape)
+        
         return resized_image, resize_ratio, left_top_of_human_instance
 
     def keypoints_transform(self, resize_ratio, left_top):
-        transformed_keypoints = self.keypoints.numpy()
+        transformed_keypoints = np.array(self.keypoints)
         for i in range(self.num_of_joints):
             if transformed_keypoints[i, 2] > 0.0:
                 transformed_keypoints[i, 0] = int((transformed_keypoints[i, 0] - left_top[0]) * resize_ratio[1])
